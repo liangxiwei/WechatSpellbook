@@ -5,12 +5,15 @@ import android.content.Context
 import android.view.ContextMenu
 import android.view.View
 import android.widget.AdapterView
+import android.widget.BaseAdapter
 import com.gh0u1l5.wechatmagician.spellbook.C
 import com.gh0u1l5.wechatmagician.spellbook.WechatStatus
 import com.gh0u1l5.wechatmagician.spellbook.base.EventCenter
 import com.gh0u1l5.wechatmagician.spellbook.base.Hooker
+import com.gh0u1l5.wechatmagician.spellbook.interfaces.IListDataHook
 import com.gh0u1l5.wechatmagician.spellbook.interfaces.IPopupMenuHook
 import com.gh0u1l5.wechatmagician.spellbook.mirror.com.tencent.mm.ui.base.Classes.MMListPopupWindow
+import com.gh0u1l5.wechatmagician.spellbook.mirror.com.tencent.mm.ui.contact.Classes
 import com.gh0u1l5.wechatmagician.spellbook.mirror.com.tencent.mm.ui.contact.Classes.AddressUI
 import com.gh0u1l5.wechatmagician.spellbook.mirror.com.tencent.mm.ui.contact.Classes.ContactLongClickListener
 import com.gh0u1l5.wechatmagician.spellbook.mirror.com.tencent.mm.ui.conversation.Classes.ConversationCreateContextMenuListener
@@ -21,7 +24,7 @@ import de.robv.android.xposed.XposedHelpers.*
 object MenuAppender : EventCenter() {
 
     override val interfaces: List<Class<*>>
-        get() = listOf(IPopupMenuHook::class.java)
+        get() = listOf(IPopupMenuHook::class.java, IListDataHook::class.java)
 
     data class PopupMenuItem (
             val groupId: Int,
@@ -42,6 +45,7 @@ object MenuAppender : EventCenter() {
         return when (event) {
             "onPopupMenuForContactsCreating" -> onPopupMenuForContactsCreateHooker
             "onPopupMenuForConversationsCreating" -> onPopupMenuForConversationsCreateHooker
+            "onContactListChange", "onConversationListChange" -> onNotifyDataSetChangedHooker
             else -> throw IllegalArgumentException("Unknown event: $event")
         }
     }
@@ -146,4 +150,34 @@ object MenuAppender : EventCenter() {
 
         WechatStatus.toggle(WechatStatus.StatusFlag.STATUS_FLAG_CONVERSATION_POPUP)
     }
+    private val onNotifyDataSetChangedHooker = Hooker{
+        findAndHookMethod(C.BaseAdapter, "notifyDataSetChanged", object : XC_MethodHook() {
+            override fun beforeHookedMethod(param: MethodHookParam) {
+                when (param.thisObject::class.java) {
+                    Classes.AddressAdapter -> {
+                        val list:ArrayList<Any> = getListData(param.thisObject as BaseAdapter)
+                        notify("onContactListChange") { plugin ->
+                            (plugin as IListDataHook).onContactListChange(list)
+                        }
+                    }
+                    com.gh0u1l5.wechatmagician.spellbook.mirror.com.tencent.mm.ui.conversation.Classes.ConversationWithCacheAdapter -> {
+                        val list:ArrayList<Any> = getListData(param.thisObject as BaseAdapter)
+                        notify("onConversationListChange") { plugin ->
+                            (plugin as IListDataHook).onConversationListChange(list)
+                        }
+                    }
+                }
+            }
+        })
+    }
+
+    private fun getListData(adapter: BaseAdapter): ArrayList<Any> {
+        val items: ArrayList<Any> = ArrayList(adapter.count)
+        for(i in 0 until adapter.count){
+            val item = adapter.getItem(i)
+            items.add(item)
+        }
+        return items
+    }
+
 }
